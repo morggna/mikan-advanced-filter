@@ -75,9 +75,9 @@
 
 ## 👤 作者
 
-- 作者: hypeling
+- 作者: morggna
 - 性能优化: Claude
-- GitHub: [@hypeling](https://github.com/hypeling)
+- GitHub: [@hypeling](https://github.com/morggna)
 
 ## 🔗 相关链接
 
