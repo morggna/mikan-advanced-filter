@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         「蜜柑计划」高级筛选器 (性能优化版)
 // @namespace    https://www.wdssmq.com/
-// @version      14.5.0
+// @version      14.6.0
 // @author       hypeling (性能优化 by Claude)
 // @description  优化性能,减少DOM操作和重复计算
 // @license      MIT
@@ -201,7 +201,8 @@
       if (!magnetLink) return;
 
       const title = magnetLink.textContent;
-      const checkbox = tr.querySelector(".magnet-select-checkbox");
+      // 使用网站原有的复选框
+      const checkbox = tr.querySelector(".js-episode-select");
 
       if (checkbox) {
         totalCount++;
@@ -340,9 +341,7 @@
       btnCopy.style.display = isSelectionMode ? "" : "none";
       filterPanel.style.display = "none";
 
-      table.querySelectorAll(".select-th, .select-td").forEach(el => {
-        el.style.display = isSelectionMode ? "" : "none";
-      });
+      // 网站原有选择列已经显示，无需额外处理
 
       if (isSelectionMode) {
         const defaultConfig = {
@@ -356,6 +355,9 @@
         const configCopy = JSON.parse(JSON.stringify(defaultConfig));
         applyFilterToTable(table, configCopy);
         _log("已自动应用默认筛选: 简体 + 1080p");
+      } else {
+        // 退出批量选择模式时，取消所有选中
+        table.querySelectorAll(".js-episode-select").forEach(cb => cb.checked = false);
       }
     });
 
@@ -366,16 +368,16 @@
     });
 
     btnSelectAll.addEventListener("click", () => {
-      table.querySelectorAll(".magnet-select-checkbox").forEach(cb => cb.checked = true);
+      table.querySelectorAll(".js-episode-select").forEach(cb => cb.checked = true);
     });
 
     btnSelectNone.addEventListener("click", () => {
-      table.querySelectorAll(".magnet-select-checkbox").forEach(cb => cb.checked = false);
+      table.querySelectorAll(".js-episode-select").forEach(cb => cb.checked = false);
     });
 
     btnCopy.addEventListener("click", () => {
       const magnetList = [];
-      table.querySelectorAll(".magnet-select-checkbox:checked").forEach(cb => {
+      table.querySelectorAll(".js-episode-select:checked").forEach(cb => {
         const magnet = cb.closest('tr').querySelector(".js-magnet")?.getAttribute("data-clipboard-text");
         if (magnet) magnetList.push(magnet.replace(/&tr=.+?(?=&|$)/g, ""));
       });
@@ -443,31 +445,7 @@
     table.classList.add('mikan-filter-processed');
     processedTables.add(newTableId);
 
-    const headerRow = table.querySelector("tr");
-    if (headerRow && !headerRow.querySelector(".select-th")) {
-      const th = document.createElement("th");
-      th.innerText = "选择";
-      th.className = "select-th";
-      th.style.cssText = "display: none; width: 40px; text-align: center;";
-      headerRow.insertBefore(th, headerRow.firstChild);
-    }
-
-    const dataRows = table.querySelectorAll("tr");
-    
-    dataRows.forEach((tr, index) => {
-      if (index === 0) return;
-      if (tr.querySelector(".select-td")) return;
-
-      const magnetLink = tr.querySelector(".magnet-link-wrap");
-      if (!magnetLink) return;
-
-      const td = document.createElement("td");
-      td.className = "select-td";
-      td.style.cssText = "display: none; text-align: center;";
-      td.innerHTML = `<input type="checkbox" class="magnet-select-checkbox" style="vertical-align: middle;">`;
-
-      tr.insertBefore(td, tr.firstChild);
-    });
+    // 不再添加新的选择列，直接使用网站原有的 .js-episode-select 复选框
 
     createAndSetupButtonsForGroup(groupContainer, episodeTableDiv || table.parentNode, table);
 
@@ -575,7 +553,7 @@
   // --- 8. 初始化 ---
 
   function init() {
-    _log("脚本初始化 v14.5.0 (两阶段筛选：优先纯简体，fallback简繁)...");
+    _log("脚本初始化 v14.6.0 (使用网站原有复选框)...");
 
     autoExpand(() => {
       _log("内容加载完成。");
