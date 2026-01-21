@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         「蜜柑计划」高级筛选器 (性能优化版)
 // @namespace    https://www.wdssmq.com/
-// @version      14.3.0
+// @version      14.5.0
 // @author       hypeling (性能优化 by Claude)
 // @description  优化性能,减少DOM操作和重复计算
 // @license      MIT
@@ -85,8 +85,9 @@
 
   // --- 3. 筛选逻辑 ---
 
-  function generateRegex(config) {
-    const cacheKey = getConfigKey(config);
+  function generateRegex(config, strictLang = false) {
+    // strictLang: true = 严格模式（纯简体/纯繁体），false = 宽松模式（包含简繁双语）
+    const cacheKey = getConfigKey(config) + (strictLang ? '_strict' : '_loose');
     if (regexCache.has(cacheKey)) {
       return regexCache.get(cacheKey);
     }
@@ -94,33 +95,41 @@
     const patterns = [];
     const resExcludeParts = [];
 
-    if (config.langSCTC) {
-      patterns.push(
+    // 语言筛选逻辑
+    const langPatterns = [];
+    
+    if (config.langSC) {
+      if (strictLang) {
+        // 严格模式：纯简体，排除繁体
+        langPatterns.push("(?=.*(简|CHS|GB))(?!.*(繁|CHT|BIG5))");
+      } else {
+        // 宽松模式：包含简体即可（含简繁双语）
+        langPatterns.push("简|CHS|GB");
+      }
+    }
+    
+    if (config.langTC) {
+      if (strictLang) {
+        // 严格模式：纯繁体，排除简体
+        langPatterns.push("(?=.*(繁|CHT|BIG5))(?!.*(简|CHS|GB))");
+      } else {
+        // 宽松模式：包含繁体即可
+        langPatterns.push("繁|CHT|BIG5");
+      }
+    }
+    
+    if (config.langSCTC && !config.langSC && !config.langTC) {
+      // 仅选了简繁：专门匹配简繁双语
+      langPatterns.push(
         "简繁|繁简",
         "简体.*繁体|繁体.*简体",
         "CHS.*CHT|CHT.*CHS",
         "GB.*BIG5|BIG5.*GB"
       );
     }
-
-    if (config.langSC && !config.langSCTC) {
-      patterns.push(
-        "(?=.*(简体|简中|简日|CHS|GB))(?!.*(繁|CHT|BIG5))"
-      );
-    } else if (config.langSC && config.langSCTC) {
-      patterns.push(
-        "简体|简中|简日|CHS|GB"
-      );
-    }
-
-    if (config.langTC && !config.langSCTC) {
-      patterns.push(
-        "(?=.*(繁体|繁體|繁中|繁日|CHT|BIG5))(?!.*(简|CHS|GB))"
-      );
-    } else if (config.langTC && config.langSCTC) {
-      patterns.push(
-        "繁体|繁體|繁中|繁日|CHT|BIG5"
-      );
+    
+    if (langPatterns.length > 0) {
+      patterns.push(...langPatterns);
     }
 
     const resParts = [];
@@ -168,7 +177,7 @@
 
     const regex = new RegExp(regexStr, "i");
     
-    if (regexCache.size > 20) {
+    if (regexCache.size > 50) {
       const firstKey = regexCache.keys().next().value;
       regexCache.delete(firstKey);
     }
@@ -178,11 +187,13 @@
   }
 
   function applyFilterToTable(table, config) {
-    const regex = generateRegex(config);
     const rows = table.querySelectorAll("tr");
     
+    // 第一阶段：严格模式（纯简体/纯繁体）
+    const strictRegex = generateRegex(config, true);
     let matchCount = 0;
     let totalCount = 0;
+    const checkResults = [];
     
     rows.forEach((tr, index) => {
       if (index === 0) return;
@@ -194,10 +205,26 @@
 
       if (checkbox) {
         totalCount++;
-        const shouldCheck = !regex || regex.test(title);
-        checkbox.checked = shouldCheck;
+        const shouldCheck = !strictRegex || strictRegex.test(title);
+        checkResults.push({ checkbox, shouldCheck, title });
         if (shouldCheck) matchCount++;
       }
+    });
+    
+    // 第二阶段：如果严格模式没有匹配，fallback到宽松模式（包含简繁双语）
+    if (matchCount === 0 && (config.langSC || config.langTC)) {
+      _log("严格模式无匹配，尝试宽松模式（含简繁双语）...");
+      const looseRegex = generateRegex(config, false);
+      
+      checkResults.forEach(item => {
+        item.shouldCheck = !looseRegex || looseRegex.test(item.title);
+        if (item.shouldCheck) matchCount++;
+      });
+    }
+    
+    // 应用结果
+    checkResults.forEach(item => {
+      item.checkbox.checked = item.shouldCheck;
     });
     
     _log(`筛选完成: ${matchCount}/${totalCount} 项被选中`);
@@ -363,6 +390,10 @@
   // --- 5. 表格处理 ---
 
   function processTable(table) {
+    // 双重检查：data 属性 + class
+    if (table.classList.contains('mikan-filter-processed')) {
+      return false;
+    }
     const tableId = table.getAttribute('data-processed-id');
     if (tableId && processedTables.has(tableId)) {
       return false;
@@ -402,8 +433,14 @@
   }
 
   function processTableWithContainer(table, groupContainer, episodeTableDiv) {
+    // 双重检查：防止重复处理
+    if (table.classList.contains('mikan-filter-processed')) {
+      return false;
+    }
+    
     const newTableId = 'table_' + Math.random().toString(36).substr(2, 9);
     table.setAttribute('data-processed-id', newTableId);
+    table.classList.add('mikan-filter-processed');
     processedTables.add(newTableId);
 
     const headerRow = table.querySelector("tr");
@@ -538,7 +575,7 @@
   // --- 8. 初始化 ---
 
   function init() {
-    _log("脚本初始化 v14.3.0 (修复选择器遍历逻辑)...");
+    _log("脚本初始化 v14.5.0 (两阶段筛选：优先纯简体，fallback简繁)...");
 
     autoExpand(() => {
       _log("内容加载完成。");
