@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         「蜜柑计划」高级筛选器 (性能优化版)
 // @namespace    https://www.wdssmq.com/
-// @version      14.2.0
+// @version      14.3.0
 // @author       hypeling (性能优化 by Claude)
 // @description  优化性能,减少DOM操作和重复计算
 // @license      MIT
@@ -368,21 +368,33 @@
       return false;
     }
 
-    // 修复：适配新的DOM结构
-    // 新结构: .subgroup-text → .episode-table (div) → table
+    // 修复：不依赖相邻兄弟关系，向上遍历找 .subgroup-text
     const episodeTableDiv = table.closest('.episode-table');
-    if (!episodeTableDiv) {
-      // 兼容旧结构: .subgroup-text → table
-      const groupContainer = table.previousElementSibling;
-      if (!groupContainer || !groupContainer.matches('.subgroup-text')) {
-        return false;
+    let groupContainer = null;
+    
+    if (episodeTableDiv) {
+      // 新结构: 从 .episode-table 向前遍历找 .subgroup-text（跳过脚本插入的元素）
+      let sibling = episodeTableDiv.previousElementSibling;
+      while (sibling) {
+        if (sibling.matches('.subgroup-text')) {
+          groupContainer = sibling;
+          break;
+        }
+        sibling = sibling.previousElementSibling;
       }
-      // 旧结构处理逻辑保持不变
-      return processTableWithContainer(table, groupContainer, null);
+    } else {
+      // 旧结构: table 直接在 .subgroup-text 后面
+      let sibling = table.previousElementSibling;
+      while (sibling) {
+        if (sibling.matches('.subgroup-text')) {
+          groupContainer = sibling;
+          break;
+        }
+        sibling = sibling.previousElementSibling;
+      }
     }
 
-    const groupContainer = episodeTableDiv.previousElementSibling;
-    if (!groupContainer || !groupContainer.matches('.subgroup-text')) {
+    if (!groupContainer) {
       return false;
     }
 
@@ -426,11 +438,11 @@
   }
 
   const throttledScan = throttle(() => {
-    // 修复：同时支持新旧两种DOM结构
-    const newStructureTables = document.querySelectorAll(".subgroup-text + .episode-table table");
-    const oldStructureTables = document.querySelectorAll(".subgroup-text + table");
+    // 修复：直接找所有 .episode-table 内的 table，不依赖相邻兄弟选择器
+    const episodeTables = document.querySelectorAll(".episode-table table");
+    const standaloneTables = document.querySelectorAll(".central-container > table");
     
-    const allTables = new Set([...newStructureTables, ...oldStructureTables]);
+    const allTables = new Set([...episodeTables, ...standaloneTables]);
     let processedCount = 0;
 
     allTables.forEach(table => {
@@ -526,7 +538,7 @@
   // --- 8. 初始化 ---
 
   function init() {
-    _log("脚本初始化 v14.2.0 (DOM结构兼容修复)...");
+    _log("脚本初始化 v14.3.0 (修复选择器遍历逻辑)...");
 
     autoExpand(() => {
       _log("内容加载完成。");
