@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         「蜜柑计划」高级筛选器 (性能优化版)
 // @namespace    https://www.wdssmq.com/
-// @version      14.1.0
+// @version      14.2.0
 // @author       hypeling (性能优化 by Claude)
 // @description  优化性能,减少DOM操作和重复计算
 // @license      MIT
@@ -25,16 +25,16 @@
 
   // --- 1. 全局状态 ---
   let processedTables = new Set();
-  let regexCache = new Map(); // 新增:正则表达式缓存
+  let regexCache = new Map();
 
   const _config = {
     data: {},
     dataDef: {
       langSC: true,
       langTC: false,
-      langSCTC: false,    // 改为 false，避免混入简繁双语
+      langSCTC: false,
       res1080p: true,
-      res2160p: false,    // 改为 false，只保留1080p
+      res2160p: false,
       res720p: false,
     },
     save: () => GM_setValue(gm_name + "_config", _config.data),
@@ -45,7 +45,6 @@
 
   // --- 2. 工具函数 ---
   
-  // 节流函数
   function throttle(func, wait) {
     let timeout = null;
     let previous = 0;
@@ -71,7 +70,6 @@
     };
   }
 
-  // 防抖函数
   function debounce(func, wait) {
     let timeout;
     return function(...args) {
@@ -80,7 +78,6 @@
     };
   }
 
-  // 生成配置的缓存键
   function getConfigKey(config) {
     return JSON.stringify(config);
   }
@@ -89,7 +86,6 @@
   // --- 3. 筛选逻辑 ---
 
   function generateRegex(config) {
-    // 检查缓存
     const cacheKey = getConfigKey(config);
     if (regexCache.has(cacheKey)) {
       return regexCache.get(cacheKey);
@@ -98,7 +94,6 @@
     const patterns = [];
     const resExcludeParts = [];
 
-    // 简繁双语优先级最高（必须先检查）
     if (config.langSCTC) {
       patterns.push(
         "简繁|繁简",
@@ -108,31 +103,26 @@
       );
     }
 
-    // 纯简体：包含简体标识，排除繁体和简繁
     if (config.langSC && !config.langSCTC) {
       patterns.push(
         "(?=.*(简体|简中|简日|CHS|GB))(?!.*(繁|CHT|BIG5))"
       );
     } else if (config.langSC && config.langSCTC) {
-      // 如果同时选了简体和简繁，则接受所有包含"简"的
       patterns.push(
         "简体|简中|简日|CHS|GB"
       );
     }
 
-    // 纯繁体：包含繁体标识，排除简体和简繁
     if (config.langTC && !config.langSCTC) {
       patterns.push(
         "(?=.*(繁体|繁體|繁中|繁日|CHT|BIG5))(?!.*(简|CHS|GB))"
       );
     } else if (config.langTC && config.langSCTC) {
-      // 如果同时选了繁体和简繁，则接受所有包含"繁"的
       patterns.push(
         "繁体|繁體|繁中|繁日|CHT|BIG5"
       );
     }
 
-    // 分辨率筛选
     const resParts = [];
     if (config.res1080p) {
       resParts.push("1080p|1920x1080|1080P");
@@ -160,12 +150,10 @@
 
     let regexStr = "";
     
-    // 语言条件
     if (patterns.length > 0) {
       regexStr = `(?:${patterns.join("|")})`;
     }
     
-    // 分辨率条件
     if (resParts.length > 0) {
       if (regexStr) {
         regexStr = `(?=.*(?:${regexStr}))(?=.*(?:${resParts.join("|")}))`;
@@ -173,7 +161,6 @@
         regexStr = `(?=.*(?:${resParts.join("|")}))`;
       }
       
-      // 排除条件
       if (resExcludeParts.length > 0) {
         regexStr += `(?!.*(?:${resExcludeParts.join("|")}))`;
       }
@@ -181,7 +168,6 @@
 
     const regex = new RegExp(regexStr, "i");
     
-    // 缓存正则表达式
     if (regexCache.size > 20) {
       const firstKey = regexCache.keys().next().value;
       regexCache.delete(firstKey);
@@ -198,7 +184,6 @@
     let matchCount = 0;
     let totalCount = 0;
     
-    // 直接同步执行，避免多个字幕组操作时的异步冲突
     rows.forEach((tr, index) => {
       if (index === 0) return;
       const magnetLink = tr.querySelector(".magnet-link-wrap");
@@ -221,12 +206,11 @@
 
   // --- 4. UI 创建 ---
 
-  function createFilterPanel(groupContainer, table) {
+  function createFilterPanel(groupContainer, episodeTableDiv, table) {
     const filterPanel = document.createElement("div");
     filterPanel.className = "group-filter-panel";
     filterPanel.style.cssText = "display: none; margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 5px; background-color: #f9f9f9;";
 
-    // 为每个字幕组创建独立的配置副本
     const localConfig = {
       langSC: true,
       langTC: false,
@@ -255,34 +239,30 @@
       </div>
     `;
 
-    table.parentNode.insertBefore(filterPanel, table);
+    // 插入到 .episode-table 之前（即字幕组标题之后）
+    episodeTableDiv.parentNode.insertBefore(filterPanel, episodeTableDiv);
 
     const applyBtn = filterPanel.querySelector(".apply-filter-btn");
-    // 每个面板独立的应用逻辑，使用自己的 localConfig
     applyBtn.addEventListener("click", () => {
-      // 重新读取复选框状态到新对象，避免修改原配置
       const currentConfig = {};
       filterPanel.querySelectorAll(".filter-opt").forEach(cb => {
         currentConfig[cb.dataset.key] = cb.checked;
-        // 同步更新 localConfig
         localConfig[cb.dataset.key] = cb.checked;
       });
-      // 使用深拷贝的配置应用筛选
       const configCopy = JSON.parse(JSON.stringify(currentConfig));
       applyFilterToTable(table, configCopy);
       applyBtn.textContent = "✓ 已应用";
       setTimeout(() => { applyBtn.textContent = "应用筛选"; }, 1500);
     });
 
-    // 返回配置对象，供其他函数使用
     filterPanel._localConfig = localConfig;
     return filterPanel;
   }
 
-  function createAndSetupButtonsForGroup(groupContainer, table) {
+  function createAndSetupButtonsForGroup(groupContainer, episodeTableDiv, table) {
     if (!groupContainer || groupContainer.querySelector('.group-controls')) return;
 
-    const filterPanel = createFilterPanel(groupContainer, table);
+    const filterPanel = createFilterPanel(groupContainer, episodeTableDiv, table);
 
     const controls = document.createElement("div");
     controls.className = "group-controls";
@@ -324,7 +304,6 @@
 
     let isSelectionMode = false;
 
-    // 批量选择模式切换
     btnToggle.addEventListener("click", () => {
       isSelectionMode = !isSelectionMode;
       btnToggle.style.backgroundColor = isSelectionMode ? '#cce5ff' : '';
@@ -334,14 +313,11 @@
       btnCopy.style.display = isSelectionMode ? "" : "none";
       filterPanel.style.display = "none";
 
-      // 批量显示/隐藏
       table.querySelectorAll(".select-th, .select-td").forEach(el => {
         el.style.display = isSelectionMode ? "" : "none";
       });
 
-      // 启用批量选择模式时,自动应用简体+1080p筛选
       if (isSelectionMode) {
-        // 每次都创建新的配置对象，避免引用污染
         const defaultConfig = {
           langSC: true,
           langTC: false,
@@ -350,7 +326,6 @@
           res2160p: false,
           res720p: false
         };
-        // 深拷贝配置，确保不会被修改
         const configCopy = JSON.parse(JSON.stringify(defaultConfig));
         applyFilterToTable(table, configCopy);
         _log("已自动应用默认筛选: 简体 + 1080p");
@@ -364,16 +339,13 @@
     });
 
     btnSelectAll.addEventListener("click", () => {
-      // 直接执行,不使用节流
       table.querySelectorAll(".magnet-select-checkbox").forEach(cb => cb.checked = true);
     });
 
     btnSelectNone.addEventListener("click", () => {
-      // 直接执行,不使用节流
       table.querySelectorAll(".magnet-select-checkbox").forEach(cb => cb.checked = false);
     });
 
-    // 每个字幕组独立的复制功能,不共享节流
     btnCopy.addEventListener("click", () => {
       const magnetList = [];
       table.querySelectorAll(".magnet-select-checkbox:checked").forEach(cb => {
@@ -396,17 +368,32 @@
       return false;
     }
 
-    const groupContainer = table.previousElementSibling;
+    // 修复：适配新的DOM结构
+    // 新结构: .subgroup-text → .episode-table (div) → table
+    const episodeTableDiv = table.closest('.episode-table');
+    if (!episodeTableDiv) {
+      // 兼容旧结构: .subgroup-text → table
+      const groupContainer = table.previousElementSibling;
+      if (!groupContainer || !groupContainer.matches('.subgroup-text')) {
+        return false;
+      }
+      // 旧结构处理逻辑保持不变
+      return processTableWithContainer(table, groupContainer, null);
+    }
 
+    const groupContainer = episodeTableDiv.previousElementSibling;
     if (!groupContainer || !groupContainer.matches('.subgroup-text')) {
       return false;
     }
 
+    return processTableWithContainer(table, groupContainer, episodeTableDiv);
+  }
+
+  function processTableWithContainer(table, groupContainer, episodeTableDiv) {
     const newTableId = 'table_' + Math.random().toString(36).substr(2, 9);
     table.setAttribute('data-processed-id', newTableId);
     processedTables.add(newTableId);
 
-    // 使用DocumentFragment批量添加DOM元素
     const headerRow = table.querySelector("tr");
     if (headerRow && !headerRow.querySelector(".select-th")) {
       const th = document.createElement("th");
@@ -417,7 +404,6 @@
     }
 
     const dataRows = table.querySelectorAll("tr");
-    const fragment = document.createDocumentFragment();
     
     dataRows.forEach((tr, index) => {
       if (index === 0) return;
@@ -434,14 +420,17 @@
       tr.insertBefore(td, tr.firstChild);
     });
 
-    createAndSetupButtonsForGroup(groupContainer, table);
+    createAndSetupButtonsForGroup(groupContainer, episodeTableDiv || table.parentNode, table);
 
     return true;
   }
 
-  // 节流扫描函数
   const throttledScan = throttle(() => {
-    const allTables = document.querySelectorAll(".subgroup-text + table");
+    // 修复：同时支持新旧两种DOM结构
+    const newStructureTables = document.querySelectorAll(".subgroup-text + .episode-table table");
+    const oldStructureTables = document.querySelectorAll(".subgroup-text + table");
+    
+    const allTables = new Set([...newStructureTables, ...oldStructureTables]);
     let processedCount = 0;
 
     allTables.forEach(table => {
@@ -493,7 +482,6 @@
     const targetNode = document.querySelector(".central-container");
     if (!targetNode) return;
 
-    // 使用防抖优化MutationObserver
     const debouncedScan = debounce(() => {
       _log("检测到新表格,重新扫描...");
       scanAllTables();
@@ -502,17 +490,16 @@
     const observer = new MutationObserver((mutations) => {
       let hasNewTables = false;
 
-      // 只检查实际添加的表格节点
       for (const mutation of mutations) {
         if (mutation.type !== 'childList') continue;
         
         for (const node of mutation.addedNodes) {
           if (node.nodeType === 1) {
-            if (node.matches && node.matches("table")) {
+            if (node.matches && (node.matches("table") || node.matches(".episode-table"))) {
               hasNewTables = true;
               break;
             }
-            if (node.querySelectorAll && node.querySelectorAll("table").length > 0) {
+            if (node.querySelectorAll && (node.querySelectorAll("table").length > 0 || node.querySelectorAll(".episode-table").length > 0)) {
               hasNewTables = true;
               break;
             }
@@ -539,7 +526,7 @@
   // --- 8. 初始化 ---
 
   function init() {
-    _log("脚本初始化 (性能优化版)...");
+    _log("脚本初始化 v14.2.0 (DOM结构兼容修复)...");
 
     autoExpand(() => {
       _log("内容加载完成。");
